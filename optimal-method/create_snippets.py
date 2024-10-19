@@ -51,7 +51,6 @@ def save_snippets_to_json(snippets, output_file):
         json.dump(snippets, file, indent=4)
 
 def search_and_extract_snippets():
-    # Azure DevOps configuration
     organization = ""
     project = ""
     pat = ""
