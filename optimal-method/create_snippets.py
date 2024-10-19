@@ -52,9 +52,9 @@ def save_snippets_to_json(snippets, output_file):
 
 def search_and_extract_snippets():
     # Azure DevOps configuration
-    organization = "ishanundre2004"
-    project = "COEP Hackathon"
-    pat = "llovcztw3kxlpoe2y2waqxwpovzmfegu3zuxyudln25s2pvlthfq"
+    organization = ""
+    project = ""
+    pat = ""
 
     # Create authorization header with PAT
     authorization = str(base64.b64encode(bytes(':' + pat, 'ascii')), 'ascii')
