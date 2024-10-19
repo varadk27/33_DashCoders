@@ -177,9 +177,9 @@ def evaluate_code(snippet, standards):
 # Search for the relevant keyword in Azure DevOps
 def search_video_processor_class(query):
     # Azure DevOps configuration
-    organization = "ishanundre2004"
-    project = "COEP Hackathon"
-    pat = "llovcztw3kxlpoe2y2waqxwpovzmfegu3zuxyudln25s2pvlthfq"
+    organization = ""  
+    project =""
+    pat = ""
 
     # Create authorization header with PAT
     authorization = str(base64.b64encode(bytes(':' + pat, 'ascii')), 'ascii')
