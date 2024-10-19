@@ -1,0 +1,226 @@
+[
+    {
+        "snippet": "class VideoProcessor:\r\n    def __init__(self):\r\n        self.reset()\r\n\r\n    def reset(self, filename=None):\r\n        self.processing_complete = False\r\n        self.current_frame = None\r\n        self.frame_lock = threading.Lock()\r\n        self.detection_metrics = DetectionMetrics()\r\n        self.video_duration = 0\r\n        self.video_filename = filename\r\n        self.cancel_processing = False",
+        "description": "A class that defines VideoProcessor",
+        "tags": [
+            "videoprocessor"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "class DetectionMetrics:\r\n    def __init__(self):\r\n        self.total_count = 0\r\n        self.tracked_objects = {}\r\n        self.object_details = {}",
+        "description": "A class that defines DetectionMetrics",
+        "tags": [
+            "detectionmetrics"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def init_db():\r\n    with sqlite3.connect('detection_history.db') as conn:\r\n        c = conn.cursor()\r\n        c.execute('''\r\n            CREATE TABLE IF NOT EXISTS detection_history (\r\n                id INTEGER PRIMARY KEY AUTOINCREMENT,\r\n                filename TEXT,\r\n                total_count INTEGER,\r\n                total_duration REAL,\r\n                video_duration REAL,\r\n                detection_date TIMESTAMP,\r\n                object_details TEXT\r\n            )\r\n        ''')\r\n        conn.commit()",
+        "description": "A function that defines init_db",
+        "tags": [
+            "init_db"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def process_video_thread(video_path, processor):\r\n    cap = cv2.VideoCapture(video_path)\r\n    if not cap.isOpened():\r\n        print(\"Error: Could not open video.\")\r\n        return\r\n\r\n    fps = cap.get(cv2.CAP_PROP_FPS)\r\n    frame_time = 1 / fps if fps > 0 else 0.04  # Default to 0.04s if FPS is invalid\r\n    area1 = [(4, 2), (8, 497), (1016, 494), (1016, 6)]  # Define the area for tracking\r\n    tracking_threshold = 50\r\n\r\n    while True:\r\n        if processor.cancel_processing:\r\n            print(\"Processing canceled.\")\r\n            break\r\n\r\n        ret, frame = cap.read()\r\n        if not ret:\r\n            break\r\n        frame = cv2.resize(frame, (1020, 500))\r\n\r\n        # Run detection\r\n        results = model(frame, conf=0.5, iou=0.5)[0]\r\n\r\n        # Process detections\r\n        for box in results.boxes:\r\n            x1, y1, x2, y2 = map(int, box.xyxy[0])\r\n            class_id = int(box.cls)\r\n\r\n            class_name = class_list[class_id] if 0 <= class_id < len(class_list) else \"Unknown\"\r\n\r\n            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2\r\n\r\n            if cv2.pointPolygonTest(np.array(area1, np.int32), (cx, cy), False) >= 0:\r\n                matched = False\r\n                for obj_id, (last_pos, total_duration, last_seen) in processor.detection_metrics.tracked_objects.items():\r\n                    if np.sqrt((cx - last_pos[0])**2 + (cy - last_pos[1])**2) < tracking_threshold:\r\n                        processor.detection_metrics.tracked_objects[obj_id] = ((cx, cy), total_duration + frame_time, 0)\r\n                        matched = True\r\n                        if class_name in processor.detection_metrics.object_details:\r\n                            processor.detection_metrics.object_details[class_name][\"total_duration\"] += frame_time\r\n                        break\r\n\r\n                if not matched:\r\n                    new_id = len(processor.detection_metrics.tracked_objects)\r\n                    processor.detection_metrics.tracked_objects[new_id] = ((cx, cy), frame_time, 0)\r\n                    processor.detection_metrics.total_count += 1\r\n\r\n                    if class_name not in processor.detection_metrics.object_details:\r\n                        processor.detection_metrics.object_details[class_name] = {\r\n                            \"count\": 0,\r\n                            \"total_duration\": 0\r\n                        }\r\n                    processor.detection_metrics.object_details[class_name][\"count\"] += 1\r\n                    processor.detection_metrics.object_details[class_name][\"total_duration\"] += frame_time\r\n\r\n            # Draw detection box and information\r\n            cvzone.cornerRect(frame, (x1, y1, x2-x1, y2-y1), 3, 2)\r\n            total_duration = processor.detection_metrics.tracked_objects.get(len(processor.detection_metrics.tracked_objects) - 1, ((0, 0), 0, 0))[1]\r\n            cvzone.putTextRect(frame, f'{class_name} {total_duration:.2f}s', (x1, y1), 1, 1)\r\n\r\n        with processor.frame_lock:\r\n            processor.current_frame = frame.copy()\r\n\r\n    processor.video_duration = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / fps\r\n    save_detection_results(processor.video_filename, processor.detection_metrics, processor.video_duration)\r\n    cap.release()\r\n    processor.processing_complete = True",
+        "description": "A function that defines process_video_thread",
+        "tags": [
+            "process_video_thread"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def get_frame():\r\n    while not video_processor.processing_complete:\r\n        with video_processor.frame_lock:\r\n            if video_processor.current_frame is not None:\r\n                ret, buffer = cv2.imencode('.jpg', video_processor.current_frame)\r\n                if ret:\r\n                    yield (b'--frame\\r\\n'\r\n                           b'Content-Type: image/jpeg\\r\\n\\r\\n' + buffer.tobytes() + b'\\r\\n')\r\n        time.sleep(0.03)",
+        "description": "A function that defines get_frame",
+        "tags": [
+            "get_frame"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def save_detection_results(filename, metrics, video_duration):\r\n    with sqlite3.connect('detection_history.db') as conn:\r\n        c = conn.cursor()\r\n        total_duration = sum(duration for _, duration, _ in metrics.tracked_objects.values())\r\n        c.execute('''\r\n            INSERT INTO detection_history \r\n            (filename, total_count, total_duration, video_duration, detection_date, object_details)\r\n            VALUES (?, ?, ?, ?, ?, ?)\r\n        ''', (\r\n            filename,\r\n            metrics.total_count,\r\n            total_duration,\r\n            video_duration,\r\n            datetime.now(),\r\n            json.dumps(metrics.object_details)\r\n        ))\r\n        conn.commit()",
+        "description": "A function that defines save_detection_results",
+        "tags": [
+            "save_detection_results"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def cancel_processing():\r\n    video_processor.cancel_processing = True\r\n    return jsonify({'success': True, 'message': 'Processing canceled'}), 200",
+        "description": "A function that defines cancel_processing",
+        "tags": [
+            "cancel_processing"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def delete_history():\r\n    history_id = request.json.get('id')\r\n    if not history_id:\r\n        return jsonify({'error': 'No history ID provided'}), 400\r\n\r\n    with sqlite3.connect('detection_history.db') as conn:\r\n        c = conn.cursor()\r\n        c.execute('DELETE FROM detection_history WHERE id = ?', (history_id,))\r\n        conn.commit()\r\n\r\n    return jsonify({'success': True, 'message': 'History deleted successfully'}), 200",
+        "description": "A function that defines delete_history",
+        "tags": [
+            "delete_history"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def index():\r\n    return render_template('index.html')",
+        "description": "A function that defines index",
+        "tags": [
+            "index"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def upload_file():\r\n    if 'video' not in request.files:\r\n        return jsonify({'error': 'No video file uploaded'}), 400\r\n\r\n    file = request.files['video']\r\n    if file.filename == '':\r\n        return jsonify({'error': 'No selected file'}), 400\r\n\r\n    if file:\r\n        filename = secure_filename(file.filename)\r\n        unique_filename = f\"{filename.rsplit('.', 1)[0]}_{int(time.time())}.mp4\"\r\n        filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)\r\n        file.save(filepath)\r\n\r\n        video_processor.reset(unique_filename)\r\n\r\n        processing_thread = threading.Thread(target=process_video_thread, args=(filepath, video_processor))\r\n        processing_thread.start()\r\n\r\n        return jsonify({'success': True}), 200",
+        "description": "A function that defines upload_file",
+        "tags": [
+            "upload_file"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def video_feed():\r\n    return Response(get_frame(), mimetype='multipart/x-mixed-replace; boundary=frame')",
+        "description": "A function that defines video_feed",
+        "tags": [
+            "video_feed"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def get_history():\r\n    with sqlite3.connect('detection_history.db') as conn:\r\n        c = conn.cursor()\r\n        c.execute('''\r\n            SELECT id, filename, total_count, total_duration, video_duration, \r\n                   detection_date, object_details\r\n            FROM detection_history\r\n            ORDER BY detection_date DESC\r\n        ''')\r\n        history = c.fetchall()\r\n\r\n    history_list = []\r\n    for row in history:\r\n        history_list.append({\r\n            'id': row[0],\r\n            'filename': row[1],\r\n            'total_count': row[2],\r\n            'total_duration': float(row[3]),\r\n            'video_duration': float(row[4]),\r\n            'detection_date': row[5],\r\n            'object_details': json.loads(row[6])\r\n        })\r\n\r\n    return jsonify(history_list)",
+        "description": "A function that defines get_history",
+        "tags": [
+            "get_history"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def __init__(self):\r\n        self.reset()",
+        "description": "A function that defines __init__",
+        "tags": [
+            "__init__"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def reset(self, filename=None):\r\n        self.processing_complete = False\r\n        self.current_frame = None\r\n        self.frame_lock = threading.Lock()\r\n        self.detection_metrics = DetectionMetrics()\r\n        self.video_duration = 0\r\n        self.video_filename = filename\r\n        self.cancel_processing = False",
+        "description": "A function that defines reset",
+        "tags": [
+            "reset"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "def __init__(self):\r\n        self.total_count = 0\r\n        self.tracked_objects = {}\r\n        self.object_details = {}",
+        "description": "A function that defines __init__",
+        "tags": [
+            "__init__"
+        ],
+        "file_path": "/app.py"
+    },
+    {
+        "snippet": "class AStar:\n    @staticmethod\n    def heuristic(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])  # Manhattan distance\n\n    @staticmethod\n    def astar(start, goal, graph):\n        open_set = []\n        heapq.heappush(open_set, (0, start))\n        came_from = {}\n        g_score = {node: float('inf') for node in graph}\n        g_score[start] = 0\n        f_score = {node: float('inf') for node in graph}\n        f_score[start] = AStar.heuristic(start, goal)\n\n        while open_set:\n            current = heapq.heappop(open_set)[1]\n\n            if current == goal:\n                return AStar.reconstruct_path(came_from, current)\n\n            for neighbor in graph[current]:\n                tentative_g_score = g_score[current] + graph[current][neighbor]\n\n                if tentative_g_score < g_score[neighbor]:\n                    came_from[neighbor] = current\n                    g_score[neighbor] = tentative_g_score\n                    f_score[neighbor] = g_score[neighbor] + AStar.heuristic(neighbor, goal)\n                    if neighbor not in [i[1] for i in open_set]:\n                        heapq.heappush(open_set, (f_score[neighbor], neighbor))\n\n        return []\n\n    @staticmethod\n    def reconstruct_path(came_from, current):\n        total_path = [current]\n        while current in came_from:\n            current = came_from[current]\n            total_path.append(current)\n        return total_path[::-1]",
+        "description": "A class that defines AStar",
+        "tags": [
+            "astar"
+        ],
+        "file_path": "/A-starAlgorithm.py"
+    },
+    {
+        "snippet": "def heuristic(a, b):\n        return abs(a[0] - b[0]) + abs(a[1] - b[1])",
+        "description": "A function that defines heuristic",
+        "tags": [
+            "heuristic"
+        ],
+        "file_path": "/A-starAlgorithm.py"
+    },
+    {
+        "snippet": "def astar(start, goal, graph):\n        open_set = []\n        heapq.heappush(open_set, (0, start))\n        came_from = {}\n        g_score = {node: float('inf') for node in graph}\n        g_score[start] = 0\n        f_score = {node: float('inf') for node in graph}\n        f_score[start] = AStar.heuristic(start, goal)\n\n        while open_set:\n            current = heapq.heappop(open_set)[1]\n\n            if current == goal:\n                return AStar.reconstruct_path(came_from, current)\n\n            for neighbor in graph[current]:\n                tentative_g_score = g_score[current] + graph[current][neighbor]\n\n                if tentative_g_score < g_score[neighbor]:\n                    came_from[neighbor] = current\n                    g_score[neighbor] = tentative_g_score\n                    f_score[neighbor] = g_score[neighbor] + AStar.heuristic(neighbor, goal)\n                    if neighbor not in [i[1] for i in open_set]:\n                        heapq.heappush(open_set, (f_score[neighbor], neighbor))\n\n        return []",
+        "description": "A function that defines astar",
+        "tags": [
+            "astar"
+        ],
+        "file_path": "/A-starAlgorithm.py"
+    },
+    {
+        "snippet": "def reconstruct_path(came_from, current):\n        total_path = [current]\n        while current in came_from:\n            current = came_from[current]\n            total_path.append(current)\n        return total_path[::-1]",
+        "description": "A function that defines reconstruct_path",
+        "tags": [
+            "reconstruct_path"
+        ],
+        "file_path": "/A-starAlgorithm.py"
+    },
+    {
+        "snippet": "class Dijkstra:\n    @staticmethod\n    def shortest_path(graph, start):\n        min_heap = [(0, start)]\n        distances = {vertex: float('inf') for vertex in graph}\n        distances[start] = 0\n\n        while min_heap:\n            current_distance, current_vertex = heapq.heappop(min_heap)\n\n            if current_distance > distances[current_vertex]:\n                continue\n\n            for neighbor, weight in graph[current_vertex].items():\n                distance = current_distance + weight\n\n                if distance < distances[neighbor]:\n                    distances[neighbor] = distance\n                    heapq.heappush(min_heap, (distance, neighbor))\n\n        return distances",
+        "description": "A class that defines Dijkstra",
+        "tags": [
+            "dijkstra"
+        ],
+        "file_path": "/Dijkstra.py"
+    },
+    {
+        "snippet": "def shortest_path(graph, start):\n        min_heap = [(0, start)]\n        distances = {vertex: float('inf') for vertex in graph}\n        distances[start] = 0\n\n        while min_heap:\n            current_distance, current_vertex = heapq.heappop(min_heap)\n\n            if current_distance > distances[current_vertex]:\n                continue\n\n            for neighbor, weight in graph[current_vertex].items():\n                distance = current_distance + weight\n\n                if distance < distances[neighbor]:\n                    distances[neighbor] = distance\n                    heapq.heappush(min_heap, (distance, neighbor))\n\n        return distances",
+        "description": "A function that defines shortest_path",
+        "tags": [
+            "shortest_path"
+        ],
+        "file_path": "/Dijkstra.py"
+    },
+    {
+        "snippet": "class MergeSort:\n    @staticmethod\n    def sort(arr):\n        if len(arr) <= 1:\n            return arr\n\n        mid = len(arr) // 2\n        left = MergeSort.sort(arr[:mid])\n        right = MergeSort.sort(arr[mid:])\n\n        return MergeSort.merge(left, right)\n\n    @staticmethod\n    def merge(left, right):\n        result = []\n        i = j = 0\n\n        while i < len(left) and j < len(right):\n            if left[i] < right[j]:\n                result.append(left[i])\n                i += 1\n            else:\n                result.append(right[j])\n                j += 1\n\n        result.extend(left[i:])\n        result.extend(right[j:])\n        return result",
+        "description": "A class that defines MergeSort",
+        "tags": [
+            "mergesort"
+        ],
+        "file_path": "/MergeSort.py"
+    },
+    {
+        "snippet": "def sort(arr):\n        if len(arr) <= 1:\n            return arr\n\n        mid = len(arr) // 2\n        left = MergeSort.sort(arr[:mid])\n        right = MergeSort.sort(arr[mid:])\n\n        return MergeSort.merge(left, right)",
+        "description": "A function that defines sort",
+        "tags": [
+            "sort"
+        ],
+        "file_path": "/MergeSort.py"
+    },
+    {
+        "snippet": "def merge(left, right):\n        result = []\n        i = j = 0\n\n        while i < len(left) and j < len(right):\n            if left[i] < right[j]:\n                result.append(left[i])\n                i += 1\n            else:\n                result.append(right[j])\n                j += 1\n\n        result.extend(left[i:])\n        result.extend(right[j:])\n        return result",
+        "description": "A function that defines merge",
+        "tags": [
+            "merge"
+        ],
+        "file_path": "/MergeSort.py"
+    },
+    {
+        "snippet": "class Prim:\n    @staticmethod\n    def minimum_spanning_tree(graph):\n        start_vertex = list(graph.keys())[0]\n        visited = set()\n        min_heap = [(0, start_vertex)]\n        total_cost = 0\n\n        while min_heap:\n            cost, vertex = heapq.heappop(min_heap)\n\n            if vertex in visited:\n                continue\n\n            visited.add(vertex)\n            total_cost += cost\n\n            for neighbor, weight in graph[vertex].items():\n                if neighbor not in visited:\n                    heapq.heappush(min_heap, (weight, neighbor))\n\n        return total_cost",
+        "description": "A class that defines Prim",
+        "tags": [
+            "prim"
+        ],
+        "file_path": "/PrimsAlgorithm.py"
+    },
+    {
+        "snippet": "def minimum_spanning_tree(graph):\n        start_vertex = list(graph.keys())[0]\n        visited = set()\n        min_heap = [(0, start_vertex)]\n        total_cost = 0\n\n        while min_heap:\n            cost, vertex = heapq.heappop(min_heap)\n\n            if vertex in visited:\n                continue\n\n            visited.add(vertex)\n            total_cost += cost\n\n            for neighbor, weight in graph[vertex].items():\n                if neighbor not in visited:\n                    heapq.heappush(min_heap, (weight, neighbor))\n\n        return total_cost",
+        "description": "A function that defines minimum_spanning_tree",
+        "tags": [
+            "minimum_spanning_tree"
+        ],
+        "file_path": "/PrimsAlgorithm.py"
+    },
+    {
+        "snippet": "class QuickSort:\n    @staticmethod\n    def sort(arr):\n        if len(arr) <= 1:\n            return arr\n        pivot = arr[len(arr) // 2]\n        left = [x for x in arr if x < pivot]\n        middle = [x for x in arr if x == pivot]\n        right = [x for x in arr if x > pivot]\n        return QuickSort.sort(left) + middle + QuickSort.sort(right)",
+        "description": "A class that defines QuickSort",
+        "tags": [
+            "quicksort"
+        ],
+        "file_path": "/quicksort.py"
+    },
+    {
+        "snippet": "def sort(arr):\n        if len(arr) <= 1:\n            return arr\n        pivot = arr[len(arr) // 2]\n        left = [x for x in arr if x < pivot]\n        middle = [x for x in arr if x == pivot]\n        right = [x for x in arr if x > pivot]\n        return QuickSort.sort(left) + middle + QuickSort.sort(right)",
+        "description": "A function that defines sort",
+        "tags": [
+            "sort"
+        ],
+        "file_path": "/quicksort.py"
+    }
+]

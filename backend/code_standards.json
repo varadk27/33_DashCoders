@@ -1,0 +1,18 @@
+{
+    "naming_conventions": "snake_case",
+    "max_function_length": 10,
+    "min_comments": 1,
+    "max_line_length": 80,
+    "disallowed_keywords": ["eval", "exec"],
+    "max_parameters_per_function": 5,
+    "max_nesting_depth": 3,
+    "consistent_indentation": "4_spaces",
+    "require_docstrings": true,
+    "use_of_typing": "type_annotations",
+    "error_handling": "try_except",
+    "single_exit_point": true,
+    "no_hardcoded_values": true,
+    "max_class_length": 30,
+    "min_tests": 2,
+    "test_coverage": "75_percent"
+}
